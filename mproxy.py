@@ -4,6 +4,7 @@ import logging
 import socket
 import ssl
 from thread import *
+import pdb
 
 def validate_port(port):
     if not port:
@@ -63,6 +64,51 @@ def proxy_server(webserver, port, conn, data, addr):
         conn.close()
         sys.exit(1)
 
+def is_ssl_req(data):
+    first_line = data.split('\n')[0]
+    return (first_line.split(' ')[0] == 'CONNECT')
+
+def replace_with_proper_url(url, webserver):
+    if "http://" in url:
+        url = url[7:]
+
+    if webserver in url:
+        url = url[len(webserver):]
+
+    return url
+
+def sanitize_data(data, webserver):
+    print "x---------------------Sanitizing Data---------------------x"
+    data_arr = data.split('\n')
+
+    # Replace first line with route, not full domain
+    first_line = data_arr[0].split(" ")
+    first_line[1] = replace_with_proper_url(first_line[1], webserver)
+    first_line_str = " ".join(first_line)
+    data_arr[0] = first_line_str
+
+    # Remove keep alive connection, replace with close connection
+    conn_keep_alive_ind = data_arr.index("Connection: keep-alive\r")
+    if conn_keep_alive_ind is not -1:
+        data_arr[conn_keep_alive_ind] = "Connection: close\r"
+
+    # Remove encoding
+    # accept_enc_index = [idx for idx, s in enumerate(data_arr) if 'Accept-Encoding:' in s][0]
+    # data_arr.pop(accept_enc_index)
+
+    # Done sanitizing!
+
+    print "-----------------------------data before:-----------------------------------"
+    print data
+    print "----------------------------------------------------------------------------"
+    data = ""
+    data = "\n".join(data_arr)
+
+    print "-------------------------------data after:----------------------------------"
+    print data
+    print "----------------------------------------------------------------------------"
+    return data
+
 
 def conn_string(conn, data, addr):
     # Client Browser requests
@@ -90,8 +136,8 @@ def conn_string(conn, data, addr):
         print "WEBSERVER:", webserver
         print "------------------------------------------------------"
 
-        is_https_request = (first_line.split(' ')[0] == 'CONNECT')
-
+        is_https_request = is_ssl_req(data)
+        data = sanitize_data(data, webserver)
         proxy_server(webserver, port, conn, data, addr)
     except:
         pass
