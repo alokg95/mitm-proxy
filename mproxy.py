@@ -23,12 +23,31 @@ def parse_input_args():
     parser.add_argument('-p', '--port', nargs='?', type=int, help='port to connect to')
     parser.add_argument('-t', '--timeout', nargs='?', type=int, default='-1', help='wait time for server response before timing out')
     parser.add_argument('-l', '--log', nargs=1, help='logs to directory')
+    parser.add_argument('-l', '--log', nargs='?', default=None, const=os.getcwd(), help='logs all requests and responses')
     args = parser.parse_args()
 
     print args
     validate_port(args.port)
 
-    return args.port, args.numworker, args.timeout, args.log
+    logdir = args.log
+
+    if logdir:
+        if not os.path.exists(logdir):
+            try:
+                os.makedirs(logdir)
+            except OSError as ex:
+                if ex.errno != errno.EEXIST:
+                    raise
+        if not logdir.endswith("/"):
+            logdir = logdir + "/"
+    if not os.path.exists(CERTS_DIR):
+        try:
+            os.makedirs(CERTS_DIR)
+        except OSError as ex:
+            if ex.errno != errno.EEXIST:
+                raise
+
+    return args.port, args.numworker, args.timeout, logdir
 
 
 def proxy_server(webserver, port, conn, data, addr):
@@ -40,14 +59,12 @@ def proxy_server(webserver, port, conn, data, addr):
         print "------------------DATA SENT FROM PROXY TO SERVER------------------"
         print data
         s.send(data)
-        print "------------------------------------------------------------------"
 
         while 1:
             # read reply or data to from end web server
             reply = s.recv(buffer_size)
             print "------------------RESPONSE FROM SERVER (need to fwd to client)------------------"
             print reply
-            print "--------------------------------------------------------------------------------"
             if(len(reply) > 0):
                 conn.send(reply)
                 dar = float(len(reply))
@@ -78,7 +95,6 @@ def replace_with_proper_url(url, webserver):
     return url
 
 def sanitize_data(data, webserver):
-    print "x---------------------Sanitizing Data---------------------x"
     data_arr = data.split('\n')
 
     # Replace first line with route, not full domain
@@ -93,26 +109,28 @@ def sanitize_data(data, webserver):
         data_arr[conn_keep_alive_ind] = "Connection: close\r"
 
     # Remove encoding
-    # accept_enc_index = [idx for idx, s in enumerate(data_arr) if 'Accept-Encoding:' in s][0]
-    # data_arr.pop(accept_enc_index)
+    accept_enc_index = [idx for idx, s in enumerate(data_arr) if 'Accept-Encoding:' in s][0]
+    data_arr.pop(accept_enc_index)
 
     # Done sanitizing!
 
-    print "-----------------------------data before:-----------------------------------"
-    print data
-    print "----------------------------------------------------------------------------"
+    # print "-----------------------------data before:-----------------------------------"
+    # print data
     data = ""
     data = "\n".join(data_arr)
 
-    print "-------------------------------data after:----------------------------------"
-    print data
-    print "----------------------------------------------------------------------------"
+    # print "-------------------------------data after:----------------------------------"
+    # print data
     return data
+
+def https_proxy_server(port, conn, data, addr, host):
+    x = 5
 
 
 def conn_string(conn, data, addr):
     # Client Browser requests
     try:
+        # pdb.set_trace()
         first_line = data.split('\n')[0]
         url = first_line.split(' ')[1]
         http_pos = url.find("://")
@@ -134,11 +152,13 @@ def conn_string(conn, data, addr):
             webserver = temp[:port_pos]
         print "------------------------------------------------------"
         print "WEBSERVER:", webserver
-        print "------------------------------------------------------"
 
         is_https_request = is_ssl_req(data)
         data = sanitize_data(data, webserver)
-        proxy_server(webserver, port, conn, data, addr)
+        if is_https_request:
+            https_proxy_server(port, conn, data, addr, webserver)
+        else:
+            proxy_server(webserver, port, conn, data, addr)
     except:
         pass
 
@@ -150,7 +170,6 @@ def accept_conn(s):
             data = conn.recv(buffer_size)
             print "------------------DATA FROM CLIENT TO FORWARD TO SERVER------------------"
             print data
-            print "-------------------------------------------------------------------------"
 
             start_new_thread(conn_string, (conn, data, addr))
         except:
@@ -163,11 +182,9 @@ def connect_socket(num_workers, port):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind(('', port))
         s.listen(num_workers)
-        print "Initializing sockets...done"
-        print "Sockets binded successfully"
-        print "Server started successfully", port
+        print "Initialized and binded to socket - SUCCESS"
     except:
-        print "Unable to initialize socket"
+        print "Err with socket init"
         sys.exit(2)
 
     accept_conn(s)
