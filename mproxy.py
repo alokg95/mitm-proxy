@@ -5,6 +5,7 @@ import socket
 import ssl
 from thread import *
 import pdb
+import os
 
 def validate_port(port):
     if not port:
@@ -22,7 +23,6 @@ def parse_input_args():
     parser.add_argument('-n', '--numworker', nargs='?', type=int, default='10', help='number of workers to be used for concurent requests')
     parser.add_argument('-p', '--port', nargs='?', type=int, help='port to connect to')
     parser.add_argument('-t', '--timeout', nargs='?', type=int, default='-1', help='wait time for server response before timing out')
-    parser.add_argument('-l', '--log', nargs=1, help='logs to directory')
     parser.add_argument('-l', '--log', nargs='?', default=None, const=os.getcwd(), help='logs all requests and responses')
     args = parser.parse_args()
 
@@ -30,22 +30,22 @@ def parse_input_args():
     validate_port(args.port)
 
     logdir = args.log
-
-    if logdir:
-        if not os.path.exists(logdir):
-            try:
-                os.makedirs(logdir)
-            except OSError as ex:
-                if ex.errno != errno.EEXIST:
-                    raise
-        if not logdir.endswith("/"):
-            logdir = logdir + "/"
-    if not os.path.exists(CERTS_DIR):
-        try:
-            os.makedirs(CERTS_DIR)
-        except OSError as ex:
-            if ex.errno != errno.EEXIST:
-                raise
+    #
+    # if logdir:
+    #     if not os.path.exists(logdir):
+    #         try:
+    #             os.makedirs(logdir)
+    #         except OSError as ex:
+    #             if ex.errno != errno.EEXIST:
+    #                 raise
+    #     if not logdir.endswith("/"):
+    #         logdir = logdir + "/"
+    # if not os.path.exists(CERTS_DIR):
+    #     try:
+    #         os.makedirs(CERTS_DIR)
+    #     except OSError as ex:
+    #         if ex.errno != errno.EEXIST:
+    #             raise
 
     return args.port, args.numworker, args.timeout, logdir
 
@@ -123,14 +123,71 @@ def sanitize_data(data, webserver):
     # print data
     return data
 
-def https_proxy_server(port, conn, data, addr, host):
-    x = 5
+def is_clienthello(self, data):
+        if len(data) < 20:
+            return False
+        if data.startswith('\x16\x03'):
+            length, = struct.unpack('>h', data[3:5])
+            return len(data) == 5 + length
+        elif data[0] == '\x80' and data[2:4] == '\x01\x03':
+            return len(data) == 2 + ord(data[1])
+        else:
+            return False
+
+def extract_sni_name(self, packet):
+    if packet.startswith('\x16\x03'):
+        stream = io.BytesIO(packet)
+        stream.read(0x2b)
+        session_id_length = ord(stream.read(1))
+        stream.read(session_id_length)
+        cipher_suites_length, = struct.unpack('>h', stream.read(2))
+        stream.read(cipher_suites_length + 2)
+        extensions_length, = struct.unpack('>h', stream.read(2))
+        while True:
+            data = stream.read(2)
+            if not data:
+                break
+            etype, = struct.unpack('>h', data)
+            elen, = struct.unpack('>h', stream.read(2))
+            edata = stream.read(elen)
+            if etype == 0:
+                server_name = edata[5:]
+                return server_name
+
+
+def https_proxy_server(port, conn, data, addr, webserver):
+    conn.send(b'HTTP/1.1 200 OK\r\n\r\n')
+    client_context = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
+    print "Client Context - Created"
+    client_context.load_cert_chain(certfile='cert.pem', keyfile='key.pem')
+    ssl_client_socket = client_context.wrap_socket(conn, server_side=True)
+    print "SSL Socket - Successfully Wrapped"
+
+    getreq = ssl_client_socket.read(4096)
+    print "read from client socket - success"
+    lines = getreq.split("\n")
+    lines = [x for x in lines if not x.startswith('Accept-Encoding:')]
+    conn_ind = lines.index("Connection: keep-alive\r")
+    if conn_ind != -1:
+        lines[conn_ind] = "Connection: close\r"
+    getreq = '\n'.join(lines)
+    print getreq
+    server_context = ssl.create_default_context()
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    print "Wrapping socket"
+    ssl_server_socket = server_context.wrap_socket(server_socket, server_hostname='yelp.com')
+    print "Pre-Connect"
+    ssl_server_socket.connect((webserver, int(port)))
+    print "CONNECTED BISH"
+    print "------------------------------------------------------"
+
+
 
 
 def conn_string(conn, data, addr):
     # Client Browser requests
     try:
-        # pdb.set_trace()
         first_line = data.split('\n')[0]
         url = first_line.split(' ')[1]
         http_pos = url.find("://")
@@ -148,16 +205,15 @@ def conn_string(conn, data, addr):
             port = 80
             webserver = temp[:webserver_pos]
         else:
-            port = int((temp[(port_pos + 1):])[webserver_pos - port_pos - 1])
+            port = int(temp[(port_pos + 1):])
             webserver = temp[:port_pos]
         print "------------------------------------------------------"
         print "WEBSERVER:", webserver
-
         is_https_request = is_ssl_req(data)
-        data = sanitize_data(data, webserver)
         if is_https_request:
             https_proxy_server(port, conn, data, addr, webserver)
         else:
+            data = sanitize_data(data, webserver)
             proxy_server(webserver, port, conn, data, addr)
     except:
         pass
