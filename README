@@ -1,0 +1,21 @@
+README
+--------------------
+Name: Alok Gupta
+Perm: 3579489
+
+Usage:
+python mproxy -p <port> -l <directory>
+
+Directory must be a valid, existent directory.
+
+Work Done:
+- Implemented HTTP Proxy
+- Can do MiTM attack over HTTP
+  + Removed encoding in request/response, can modify any HTML/CSS/JS response
+- Can do SSL handshake with HTTPS website
+
+Work To Do:
+- Implement MiTM for HTTPS websites
+
+Note to Abhay:
+Due to a weird issue(s), my key/cert was not being accepted (tested on yelp via Firefox). We both tried to debug this odd issue, but we were unable to come up with a solution. I had spent several hours attempting to debug why Firefox would not allow me to "add exception" like many other students were able to do, but could not find a proper solution. When testing my code on a friend's machine, it was able to properly conduct the SSL handshake. Due to this odd issue blocking me, I was unable to move forward with the project (even though I had sufficient time to implement the MiTM over HTTPs and successfully complete it). As a graduating senior (with a full-time job lined up), I would really appreciate it if you'd be able to review my code and provide partial credit.
